@@ -66,12 +66,12 @@ class Conv2D(Layer):
         # 填充
         if self.padding[0] > 0 or self.padding[1] > 0:
             padded = self._pad(inputs)
-            logger.debug(f"Padded input shape: {padded.shape}")
         else:
             padded = inputs
             
         # 初始化输出
-        output = np.zeros(self.output_shape)
+        batch_size = inputs.shape[0]  # 获取实际的批次大小
+        output = np.zeros((batch_size,) + self.output_shape[1:])  # 使用实际批次大小
         
         try:
             # 执行卷积操作（向量化版本）
@@ -84,18 +84,27 @@ class Conv2D(Layer):
                     
                     receptive_field = padded[:, h_start:h_end, w_start:w_end, :]
                     
+                    # 修改卷积计算以避免广播问题
                     for k in range(self.filters):
+                        # 确保维度匹配
+                        kernel = self.params['W'][:, :, :, k]  # (kh, kw, c)
+                        # 扩展维度以匹配批次
+                        kernel = kernel[np.newaxis, :, :, :]  # (1, kh, kw, c)
+                        
+                        # 执行卷积计算
                         output[:, i, j, k] = np.sum(
-                            receptive_field * self.params['W'][:, :, :, k],
+                            receptive_field * kernel,  # 现在广播是安全的
                             axis=(1,2,3)
                         ) + self.params['b'][k]
                         
         except Exception as e:
             logger.error(f"Error in Conv2D forward pass: {str(e)}")
-            logger.debug(f"Current shapes:")
-            logger.shape_info("receptive_field", receptive_field)
-            logger.shape_info("weights", self.params['W'])
-            logger.shape_info("output", output)
+            logger.error(f"Shapes:")
+            logger.error(f"inputs: {inputs.shape}")
+            logger.error(f"padded: {padded.shape}")
+            logger.error(f"receptive_field: {receptive_field.shape}")
+            logger.error(f"weights: {self.params['W'].shape}")
+            logger.error(f"output: {output.shape}")
             raise
             
         return output

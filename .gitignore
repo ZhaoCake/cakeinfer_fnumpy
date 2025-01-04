@@ -50,3 +50,9 @@ logs/
 # OS specific
 .DS_Store
 Thumbs.db 
+
+# Weights
+weights/
+logs/
+intermediate/
+results/

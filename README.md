@@ -88,24 +88,119 @@ pip install -r requirements.txt
 
 ## 使用方法
 
-1. 训练模型：
+### 1. 训练模型
 ```bash
-python main.py --epochs 10 --batch-size 64 --lr 0.005 --data-dir dataset
+python main.py --mode train \
+    --epochs 10 \
+    --batch-size 64 \
+    --lr 0.005 \
+    --data-dir dataset \
+    --weights-dir weights
 ```
 
 参数说明：
+- `--mode`: 运行模式，'train'用于训练（必需）
 - `--epochs`: 训练轮数（默认：10）
 - `--batch-size`: 批次大小（默认：32）
 - `--lr`: 学习率（默认：0.01）
 - `--data-dir`: 数据集存储目录（默认：'dataset'）
+- `--weights-dir`: 权重保存目录（默认：'weights'）
 
-2. 模型权重：
+### 2. 模型推理
+```bash
+python main.py --mode infer \
+    --model-name lenet_epoch_10_acc_0.9806 \
+    --test-sample 0 \
+    --save-intermediate \
+    --data-dir dataset \
+    --weights-dir weights
+```
+
+推理参数说明：
+- `--mode`: 运行模式，'infer'用于推理（必需）
+- `--model-name`: 要加载的模型名称（必需）
+- `--test-sample`: 测试样本索引（默认：0）
+- `--save-intermediate`: 是否保存中间层输出（可选）
+- `--data-dir`: 数据集目录（默认：'dataset'）
+- `--weights-dir`: 权重目录（默认：'weights'）
+
+### 3. 模型测试
+```bash
+python main.py --mode test \
+    --model-name lenet_epoch_10_acc_0.9806 \
+    --data-dir dataset \
+    --weights-dir weights \
+    --save-predictions \
+    --batch-size-test 64
+```
+
+测试参数说明：
+- `--mode`: 运行模式，'test'用于测试（必需）
+- `--model-name`: 要加载的模型名称（必需）
+- `--save-predictions`: 是否保存预测结果（可选）
+- `--batch-size-test`: 测试时的批次大小（默认：32）
+
+测试输出示例：
+```
+评估结果:
+总样本数: 10000
+正确预测数: 9806
+准确率: 0.9806
+
+各类别准确率:
+类别 0: 0.9921 (992/1000)
+类别 1: 0.9897 (990/1000)
+类别 2: 0.9845 (985/1000)
+...
+
+置信度统计:
+平均置信度: 0.9823
+最小置信度: 0.5123
+最大置信度: 0.9999
+```
+
+如果使用 `--save-predictions`，将在 `results/` 目录下生成：
+- `test_predictions.txt`: 包含每个样本的真实标签、预测标签和置信度
+
+### 4. 中间层输出
+推理时使用 `--save-intermediate` 参数会在 `intermediate/` 目录下生成：
+- `test_input.bin`: 输入数据
+- `layer_X_YYY.bin`: 每层的输出数据
+- 所有数据以32位浮点数（float32）格式存储
+- 数据按行优先（C-style）顺序存储
+
+示例日志输出：
+```
+2025-01-03 18:11:17,952 - fnumpy - INFO - Starting inference...
+2025-01-03 18:11:17,953 - fnumpy - INFO - Test sample index: 0
+2025-01-03 18:11:17,953 - fnumpy - INFO - Input shape: (1, 32, 32, 1)
+
+layer_0_Conv2D:
+输出形状: (1, 32, 32, 6)
+数值范围: [-0.123456, 0.123456]
+均值: 0.000123
+标准差: 0.012345
+
+...（其他层的输出信息）
+
+预测结果:
+预测类别: 7
+真实类别: 7
+预测正确: True
+```
+
+### 5. 文件说明
 - 权重文件保存在 `weights/` 目录下
 - 包含二进制权重文件（.bin）和结构描述文件（.modelstruct）
+- 中间层输出保存在 `intermediate/` 目录下
+- 测试结果保存在 `results/` 目录下
 
-3. 训练日志：
+### 6. 日志记录
 - 日志文件保存在 `logs/` 目录下
 - 包含详细的训练过程和调试信息
+- 记录每层的输出形状和统计信息
+- 便于与其他实现进行对比验证
+- 包含完整的测试评估报告
 
 ## 实现细节
 
