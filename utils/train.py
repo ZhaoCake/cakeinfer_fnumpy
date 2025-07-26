@@ -3,7 +3,7 @@ from tqdm import tqdm
 import time
 from .dataloader import download_mnist, create_batches
 from .weight_io import save_weights
-from utils.logger import logger
+from .logger import logger
 
 class SGD:
     """简单的随机梯度下降优化器"""

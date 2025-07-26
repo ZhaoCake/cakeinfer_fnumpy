@@ -2,6 +2,9 @@
 
 > After writing it, I really feel like I finally understand the network and parameters. The next step is to write the inference framework for Cpp, optimize it with HLS, and deploy it on FPGA
 
+> 2025-07-26
+> 发现数据集网站找不到该数据了，请自行查找下载该数据集到dataset文件夹或者你指定的数据集文件夹下。
+
 ```
   ❯❯ /home/zhaocake/WorkSpace/Vision/cakeinfer_fnumpy : python main.py --epochs 10 --batch-size 64 --lr 0.005 --data-dir dataset
 初始化LeNet模型...
@@ -75,13 +78,7 @@ Epoch 2/10:  99%|█████████████████████
 
 ## 安装
 
-1. 克隆仓库：
-```bash
-git clone https://github.com/yourusername/lenet-numpy.git
-cd lenet-numpy
-```
-
-2. 安装依赖：
+安装依赖：
 ```bash
 pip install -r requirements.txt
 ```
@@ -284,6 +281,10 @@ file.read(reinterpret_cast<char*>(&conv1), sizeof(ConvWeight));
 2. 单线程串行计算，训练速度较慢
 3. 首次运行时会自动下载MNIST数据集
 4. 建议在CPU上运行，未针对GPU优化
+
+## TODO
+
+- [ ] 模型权重的保存和加载，应该是这个问题导致了测试结果不对头。
 
 ## 许可证
 

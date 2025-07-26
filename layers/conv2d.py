@@ -49,6 +49,46 @@ class Conv2D(Layer):
             'constant'
         )
         
+    def _im2col(self, inputs):
+        """
+        将输入图像转换为列矩阵形式 (im2col)
+        :param inputs: 输入数据，形状为(batch_size, height, width, channels)
+        :return: 列矩阵，形状为(kernel_height * kernel_width * input_channels, output_height * output_width * batch_size)
+        """
+        batch_size, input_height, input_width, input_channels = inputs.shape
+        kernel_height, kernel_width = self.kernel_size
+        stride_h, stride_w = self.stride
+        output_height, output_width = self.output_shape[1], self.output_shape[2]
+        
+        # 创建输出矩阵
+        col_matrix = np.zeros((
+            batch_size,
+            kernel_height * kernel_width * input_channels,
+            output_height * output_width
+        ))
+        
+        # 填充输入
+        if self.padding[0] > 0 or self.padding[1] > 0:
+            padded_inputs = self._pad(inputs)
+        else:
+            padded_inputs = inputs
+            
+        # im2col操作
+        col_idx = 0
+        for i in range(output_height):
+            for j in range(output_width):
+                h_start = i * stride_h
+                h_end = h_start + kernel_height
+                w_start = j * stride_w
+                w_end = w_start + kernel_width
+                
+                # 提取当前感受野并重塑
+                receptive_field = padded_inputs[:, h_start:h_end, w_start:w_end, :]  # (batch, kh, kw, c)
+                col_matrix[:, :, col_idx] = receptive_field.reshape(batch_size, -1)  # (batch, kh*kw*c)
+                col_idx += 1
+                
+        return col_matrix
+    
     def forward(self, inputs):
         """
         前向传播
@@ -63,104 +103,109 @@ class Conv2D(Layer):
             
         self.inputs = inputs
         
-        # 填充
-        if self.padding[0] > 0 or self.padding[1] > 0:
-            padded = self._pad(inputs)
-        else:
-            padded = inputs
-            
-        # 初始化输出
-        batch_size = inputs.shape[0]  # 获取实际的批次大小
-        output = np.zeros((batch_size,) + self.output_shape[1:])  # 使用实际批次大小
+        # 使用im2col + GEMM实现卷积
+        batch_size = inputs.shape[0]
+        output_height, output_width = self.output_shape[1], self.output_shape[2]
         
-        try:
-            # 执行卷积操作（向量化版本）
-            for i in range(self.output_shape[1]):
-                for j in range(self.output_shape[2]):
-                    h_start = i * self.stride[0]
-                    h_end = h_start + self.kernel_size[0]
-                    w_start = j * self.stride[1]
-                    w_end = w_start + self.kernel_size[1]
-                    
-                    receptive_field = padded[:, h_start:h_end, w_start:w_end, :]
-                    
-                    # 修改卷积计算以避免广播问题
-                    for k in range(self.filters):
-                        # 确保维度匹配
-                        kernel = self.params['W'][:, :, :, k]  # (kh, kw, c)
-                        # 扩展维度以匹配批次
-                        kernel = kernel[np.newaxis, :, :, :]  # (1, kh, kw, c)
-                        
-                        # 执行卷积计算
-                        output[:, i, j, k] = np.sum(
-                            receptive_field * kernel,  # 现在广播是安全的
-                            axis=(1,2,3)
-                        ) + self.params['b'][k]
-                        
-        except Exception as e:
-            logger.error(f"Error in Conv2D forward pass: {str(e)}")
-            logger.error(f"Shapes:")
-            logger.error(f"inputs: {inputs.shape}")
-            logger.error(f"padded: {padded.shape}")
-            logger.error(f"receptive_field: {receptive_field.shape}")
-            logger.error(f"weights: {self.params['W'].shape}")
-            logger.error(f"output: {output.shape}")
-            raise
-            
+        # 将输入转换为列矩阵形式
+        col_matrix = self._im2col(inputs)  # (batch, kh*kw*c, oh*ow)
+        
+        # 重塑权重矩阵 (kh, kw, c, f) -> (kh*kw*c, f)
+        weights_reshaped = self.params['W'].reshape(-1, self.filters)
+        
+        # 执行批量矩阵乘法: (batch, kh*kw*c, oh*ow) x (kh*kw*c, f) -> (batch, oh*ow, f)
+        output = np.matmul(col_matrix.transpose(0, 2, 1), weights_reshaped)  # (batch, oh*ow, f)
+        
+        # 添加偏置并重塑输出形状
+        output = output + self.params['b']  # 广播加法
+        output = output.reshape(batch_size, output_height, output_width, self.filters)
+        
         return output
+        
         
     def backward(self, grad_output):
         """反向传播"""
-        try:
-            # 初始化梯度
-            self.grads['W'] = np.zeros_like(self.params['W'])
-            self.grads['b'] = np.zeros_like(self.params['b'])
-            grad_input = np.zeros_like(self.inputs)
+        batch_size, output_height, output_width, _ = grad_output.shape
+        
+        # 重塑梯度输出 (batch, oh, ow, f) -> (batch, oh*ow, f)
+        grad_output_reshaped = grad_output.reshape(batch_size, -1, self.filters)
+        
+        # 计算权重梯度
+        # 获取输入的列矩阵形式
+        col_matrix = self._im2col(self.inputs)  # (batch, kh*kw*c, oh*ow)
+        
+        # 计算权重梯度: (kh*kw*c, batch, oh*ow) x (batch, oh*ow, f) -> (kh*kw*c, f)
+        weights_grad = np.matmul(col_matrix.transpose(1, 0, 2).reshape(-1, batch_size * output_height * output_width),
+                                grad_output_reshaped.reshape(batch_size * output_height * output_width, -1))
+        
+        # 重塑权重梯度到原始形状
+        self.grads['W'] = weights_grad.reshape(self.kernel_size[0], self.kernel_size[1], 
+                                              self.input_shape[3], self.filters)
+        
+        # 计算偏置梯度
+        self.grads['b'] = np.sum(grad_output, axis=(0, 1, 2))
+        
+        # 计算输入梯度
+        # 重塑权重 (kh, kw, c, f) -> (f, kh*kw*c)
+        weights_reshaped = self.params['W'].reshape(-1, self.filters).T
+        
+        # 执行矩阵乘法计算输入梯度: (batch, oh*ow, f) x (f, kh*kw*c) -> (batch, oh*ow, kh*kw*c)
+        grad_input_col = np.matmul(grad_output_reshaped, weights_reshaped)  # (batch, oh*ow, kh*kw*c)
+        
+        # 将列矩阵形式转换回图像形式 (col2im)
+        grad_input = self._col2im(grad_input_col.transpose(0, 2, 1), batch_size, 
+                                 self.input_shape[1], self.input_shape[2], self.input_shape[3])
+        
+        return grad_input
+    
+    def _col2im(self, col_matrix, batch_size, input_height, input_width, input_channels):
+        """
+        将列矩阵转换回图像形式 (col2im)
+        :param col_matrix: 列矩阵，形状为(batch_size, kh*kw*c, oh*ow)
+        :param batch_size: 批次大小
+        :param input_height: 输入高度
+        :param input_width: 输入宽度
+        :param input_channels: 输入通道数
+        :return: 图像张量，形状为(batch_size, height, width, channels)
+        """
+        kernel_height, kernel_width = self.kernel_size
+        stride_h, stride_w = self.stride
+        output_height, output_width = self.output_shape[1], self.output_shape[2]
+        
+        # 初始化输出梯度
+        grad_input = np.zeros((batch_size, input_height, input_width, input_channels))
+        
+        if self.padding[0] > 0 or self.padding[1] > 0:
+            padded_grad_input = np.zeros((
+                batch_size,
+                input_height + 2*self.padding[0],
+                input_width + 2*self.padding[1],
+                input_channels
+            ))
+        else:
+            padded_grad_input = grad_input
             
-            # 填充处理
-            if self.padding[0] > 0 or self.padding[1] > 0:
-                padded = self._pad(self.inputs)
-                grad_padded = np.zeros_like(padded)
-            else:
-                padded = self.inputs
-                grad_padded = grad_input
+        # col2im操作
+        col_idx = 0
+        for i in range(output_height):
+            for j in range(output_width):
+                h_start = i * stride_h
+                h_end = h_start + kernel_height
+                w_start = j * stride_w
+                w_end = w_start + kernel_width
                 
-            # 计算梯度（向量化版本）
-            for i in range(self.output_shape[1]):
-                for j in range(self.output_shape[2]):
-                    h_start = i * self.stride[0]
-                    h_end = h_start + self.kernel_size[0]
-                    w_start = j * self.stride[1]
-                    w_end = w_start + self.kernel_size[1]
-                    
-                    receptive_field = padded[:, h_start:h_end, w_start:w_end, :]
-                    
-                    for k in range(self.filters):
-                        self.grads['W'][:, :, :, k] += np.sum(
-                            receptive_field * grad_output[:, i, j, k][:, None, None, None],
-                            axis=0
-                        )
-                        self.grads['b'][k] += np.sum(grad_output[:, i, j, k])
-                        
-                        grad_padded[:, h_start:h_end, w_start:w_end, :] += \
-                            self.params['W'][:, :, :, k] * grad_output[:, i, j, k][:, None, None, None]
-                            
-            # 如果有填充，去除填充部分
-            if self.padding[0] > 0 or self.padding[1] > 0:
-                grad_input = grad_padded[
-                    :,
-                    self.padding[0]:-self.padding[0],
-                    self.padding[1]:-self.padding[1],
-                    :
-                ]
+                # 从列矩阵中提取数据并加到对应位置
+                col_data = col_matrix[:, :, col_idx].reshape(batch_size, kernel_height, kernel_width, input_channels)
+                padded_grad_input[:, h_start:h_end, w_start:w_end, :] += col_data
+                col_idx += 1
                 
-        except Exception as e:
-            logger.error(f"Error in Conv2D backward pass: {str(e)}")
-            logger.debug(f"Current shapes:")
-            logger.shape_info("grad_output", grad_output)
-            logger.shape_info("receptive_field", receptive_field)
-            logger.shape_info("weights", self.params['W'])
-            logger.shape_info("grad_input", grad_input)
-            raise
+        # 如果有填充，去除填充部分
+        if self.padding[0] > 0 or self.padding[1] > 0:
+            grad_input = padded_grad_input[
+                :,
+                self.padding[0]:input_height+self.padding[0],
+                self.padding[1]:input_width+self.padding[1],
+                :
+            ]
             
         return grad_input

@@ -38,10 +38,28 @@ def evaluate_model(model, test_images, test_labels, batch_size=32):
     # 处理最后一个不完整批次（如果有的话）
     remaining = n_samples - n_complete_batches * batch_size
     if remaining > 0:
-        logger.info(f"跳过最后 {remaining} 个样本（不完整批次）")
+        start_idx = n_complete_batches * batch_size
+        end_idx = n_samples
+        batch_images = test_images[start_idx:end_idx]
+        batch_labels = test_labels[start_idx:end_idx]
+        
+        # 预测和计算置信度
+        batch_predictions = model.predict(batch_images)
+        probs = model.predict_proba(batch_images)
+        batch_confidences = np.max(probs, axis=1)
+        
+        # 获取真实标签
+        true_labels = np.argmax(batch_labels, axis=1)
+        
+        # 统计正确预测
+        n_correct += np.sum(batch_predictions == true_labels)
+        predictions.extend(batch_predictions)
+        confidences.extend(batch_confidences)
+        
+        logger.info(f"处理最后 {remaining} 个样本（不完整批次）")
     
     # 更新实际处理的样本数
-    n_processed = n_complete_batches * batch_size
+    n_processed = n_samples
     accuracy = n_correct / n_processed
     
     # 生成详细报告

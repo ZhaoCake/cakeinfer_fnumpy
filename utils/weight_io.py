@@ -77,12 +77,14 @@ def load_weights(model, model_name: str, weights_dir: str = 'weights'):
     
     try:
         with open(bin_path, 'rb') as f:
-            # 遍历所有层
+            # 遍历所有层，但只处理有参数的层
+            param_layer_idx = 0  # 用于跟踪有权重参数的层的索引
             for i, layer in enumerate(model.layers):
-                layer_name = f"layer_{i}_{layer.__class__.__name__}"
-                logger.debug(f"Processing layer: {layer_name}")
-                
-                if hasattr(layer, 'params'):
+                # 只处理有权重参数的层
+                if hasattr(layer, 'params') and layer.params:
+                    layer_name = f"layer_{i}_{layer.__class__.__name__}"
+                    logger.debug(f"Processing layer: {layer_name}")
+                    
                     if layer_name in weight_struct['layer_weights']:
                         # 加载每个参数
                         for param_name, param_info in weight_struct['layer_weights'][layer_name].items():
@@ -103,8 +105,13 @@ def load_weights(model, model_name: str, weights_dir: str = 'weights'):
                             except Exception as e:
                                 logger.error(f"Failed to load parameter {param_name}: {e}")
                                 raise
+                        param_layer_idx += 1
                     else:
                         logger.warning(f"Layer {layer_name} not found in weight file")
+                # 添加对没有参数的层的处理（如ReLU, MaxPool2D等）
+                else:
+                    layer_name = f"layer_{i}_{layer.__class__.__name__}"
+                    logger.debug(f"Skipping layer without parameters: {layer_name}")
     except Exception as e:
         logger.error(f"Failed to load weights: {e}")
         raise
@@ -123,4 +130,4 @@ def load_weights(model, model_name: str, weights_dir: str = 'weights'):
                 logger.debug(f"Verified {layer_name}.{param_name}: shape={param.shape}")
     
     logger.info(f"Successfully loaded {total_params} parameters")
-    logger.info("Weight validation completed") 
+    logger.info("Weight validation completed")
