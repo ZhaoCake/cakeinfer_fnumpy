@@ -211,69 +211,27 @@ layer_0_Conv2D:
 
 > 权重格式参考了[ncnn](https://github.com/Tencent/ncnn)把网络结构和参数分开存储的方式，这样没有什么其他依赖，方便cpp做推理框架
 
-### 模型结构文件 (.modelstruct)
 
-JSON格式的文本文件，记录了权重的元数据：
-```json
-{
-    "model_name": "lenet_epoch_1_acc_0.9312",
-    "layer_weights": {
-        "layer_0_Conv2D": {
-            "W": {
-                "shape": [5, 5, 1, 6],    // [height, width, in_channels, filters]
-                "dtype": "float32",
-                "offset": 0,              // 在二进制文件中的偏移量
-                "size": 150               // 参数总数
-            },
-            "b": {
-                "shape": [6],
-                "dtype": "float32",
-                "offset": 600,
-                "size": 6
-            }
-        },
-        "layer_3_Conv2D": {
-            "W": {
-                "shape": [5, 5, 6, 16],
-                "dtype": "float32",
-                "offset": 624,
-                "size": 2400
-            },
-            "b": {
-                "shape": [16],
-                "dtype": "float32",
-                "offset": 10224,
-                "size": 16
-            }
-        }
-        // ... 其他层的权重信息
-    }
-}
-```
+### 权重文件格式（.npz）
 
-### 二进制权重文件 (.bin)
+当前权重保存和加载采用NumPy官方的`.npz`格式，具有更高的可靠性和兼容性。
 
-按照modelstruct中指定的偏移量和数据类型存储的原始权重数据：
-- 所有数据使用小端序（Little-Endian）存储
-- 默认使用32位浮点数（float32）
-- 数据按层顺序连续存储
-- 每层内部按 weights(W) -> bias(b) 顺序排列
-- 多维数组按行优先（C-style）展平
+- 每个参数以`layer_X_LayerName_param`为key存储在npz文件中。
+- 保存和加载均通过`np.savez`和`np.load`实现，无需手动管理偏移、shape、dtype等。
+- 推荐仅在Python/NumPy环境下直接加载使用。
 
 示例：
-```cpp
-// 读取卷积层权重的C++代码示例
-struct ConvWeight {
-    float W[5][5][1][6];  // NHWC格式
-    float b[6];
-};
+```python
+# 保存权重（自动完成，无需手动操作）
+np.savez('weights/lenet_epoch_10_acc_0.9806.npz', **weights_dict)
 
-// 从文件指定偏移量读取
-ConvWeight conv1;
-std::ifstream file("lenet_epoch_1_acc_0.9312.bin", std::ios::binary);
-file.seekg(0);  // 使用modelstruct中的offset
-file.read(reinterpret_cast<char*>(&conv1), sizeof(ConvWeight));
+# 加载权重
+weights = np.load('weights/lenet_epoch_10_acc_0.9806.npz')
+for key in weights:
+    print(key, weights[key].shape)
 ```
+
+> 旧的自定义二进制权重（.bin/.modelstruct）已废弃，现仅保留npz格式。
 
 ## 注意事项
 

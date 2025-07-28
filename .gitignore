@@ -42,6 +42,7 @@ weights/
 logs/
 *.bin
 *.modelstruct
+*.pth
 
 # Jupyter Notebook
 .ipynb_checkpoints
